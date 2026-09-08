@@ -1,0 +1,6 @@
+{
+  "name": "CHRONO AI",
+  "description": "Human-like conversational & coding AI assistant running both online (Google Gemini) and offline (On-Device Neural Engine) in Bengali and English.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
