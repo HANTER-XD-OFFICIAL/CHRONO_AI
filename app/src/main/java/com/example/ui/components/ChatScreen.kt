@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.CircularProgressIndicator
@@ -90,6 +91,7 @@ fun ChatScreen(
 
   var inputText by remember { mutableStateOf("") }
   var showModelSelectorSheet by remember { mutableStateOf(false) }
+  var sheetInitialTab by remember { mutableStateOf(0) }
   var showPersonaMenu by remember { mutableStateOf(false) }
 
   val listState = rememberLazyListState()
@@ -103,6 +105,7 @@ fun ChatScreen(
   if (showModelSelectorSheet) {
     ModelSelectorBottomSheet(
       viewModel = viewModel,
+      initialTab = sheetInitialTab,
       onDismiss = { showModelSelectorSheet = false }
     )
   }
@@ -132,7 +135,10 @@ fun ChatScreen(
           color = ChronoCardSurface,
           border = BorderStroke(1.dp, ChronoPrimary.copy(alpha = 0.6f)),
           modifier = Modifier
-            .clickable { showModelSelectorSheet = true }
+            .clickable {
+              sheetInitialTab = 0
+              showModelSelectorSheet = true
+            }
             .testTag("btn_engine_selector")
         ) {
           Row(
@@ -210,17 +216,37 @@ fun ChatScreen(
           }
         }
 
-        // Clear Chat Button
-        IconButton(
-          onClick = { viewModel.clearChat() },
-          modifier = Modifier.size(32.dp)
-        ) {
-          Icon(
-            imageVector = Icons.Default.DeleteSweep,
-            contentDescription = "Clear Chat",
-            tint = ChronoTextMuted,
-            modifier = Modifier.size(18.dp)
-          )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          // Direct API Vault Quick Access Button
+          IconButton(
+            onClick = {
+              sheetInitialTab = 2
+              showModelSelectorSheet = true
+            },
+            modifier = Modifier
+              .size(32.dp)
+              .testTag("btn_quick_api_vault")
+          ) {
+            Icon(
+              imageVector = Icons.Default.Key,
+              contentDescription = "API Key Vault",
+              tint = ChronoPrimary,
+              modifier = Modifier.size(18.dp)
+            )
+          }
+
+          // Clear Chat Button
+          IconButton(
+            onClick = { viewModel.clearChat() },
+            modifier = Modifier.size(32.dp)
+          ) {
+            Icon(
+              imageVector = Icons.Default.DeleteSweep,
+              contentDescription = "Clear Chat",
+              tint = ChronoTextMuted,
+              modifier = Modifier.size(18.dp)
+            )
+          }
         }
       }
     }

@@ -2,7 +2,9 @@ package com.example.ai
 
 import android.util.Log
 import com.example.model.AiPersona
+import com.example.model.ApiProvider
 import com.example.model.CodeSnippet
+import com.example.model.CustomApiKeyEntry
 import com.example.model.ExecutionMode
 import com.example.model.ModelFamily
 import com.example.model.SupportedAiModel
@@ -14,7 +16,9 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.regex.Pattern
 
 data class ModelExecutionResult(
@@ -29,6 +33,17 @@ data class ModelExecutionResult(
 
 object MultiModelAiRouter {
   private const val TAG = "MultiModelAiRouter"
+
+  // Round-robin index counters for seamless load-balancing and quota-pooling
+  private val rotationCounters = ConcurrentHashMap<ModelFamily, AtomicInteger>()
+
+  private fun getOrderedActiveKeys(family: ModelFamily, config: ModelConfig): List<CustomApiKeyEntry> {
+    val activeList = config.customApiKeys.filter { it.isActive && it.provider.family == family && it.apiKey.isNotBlank() }
+    if (activeList.isEmpty()) return emptyList()
+    val counter = rotationCounters.computeIfAbsent(family) { AtomicInteger(0) }
+    val startIdx = Math.floorMod(counter.getAndIncrement(), activeList.size)
+    return List(activeList.size) { i -> activeList[(startIdx + i) % activeList.size] }
+  }
 
   private val httpClient = OkHttpClient.Builder()
     .connectTimeout(12, TimeUnit.SECONDS)
@@ -60,86 +75,209 @@ object MultiModelAiRouter {
     try {
       when (effectiveModel.family) {
         ModelFamily.GOOGLE -> {
-          val key = config.geminiApiKey.ifBlank { configManagerEffectiveGeminiKey(config) }
-          if (key.isBlank()) {
+          val activeKeys = getOrderedActiveKeys(ModelFamily.GOOGLE, config)
+          val candidateList = if (activeKeys.isNotEmpty()) {
+            activeKeys
+          } else {
+            val defaultKey = config.geminiApiKey.ifBlank { configManagerEffectiveGeminiKey(config) }
+            if (defaultKey.isNotBlank()) {
+              listOf(
+                CustomApiKeyEntry(
+                  id = "default_gemini",
+                  label = effectiveModel.displayName,
+                  provider = ApiProvider.GOOGLE_GEMINI,
+                  apiKey = defaultKey
+                )
+              )
+            } else emptyList()
+          }
+
+          if (candidateList.isEmpty()) {
             return@withContext fallbackToOffline(prompt, persona, effectiveModel, startTime, "Gemini API Key প্রয়োজন। অফলাইন অন-ডিভাইস মডেলে সুইচ করা হয়েছে।")
           }
-          val res = callGeminiApi(prompt, effectiveModel, persona, key, conversationHistory)
-          val elapsed = System.currentTimeMillis() - startTime
-          ModelExecutionResult(
-            text = res.first,
-            codeSnippets = res.second,
-            modelUsedTag = "${effectiveModel.displayName} (Google Cloud)",
-            executionMode = ExecutionMode.ONLINE_CLOUD,
-            latencyMs = elapsed
-          )
+
+          var lastException: Exception? = null
+          for ((attemptIdx, keyEntry) in candidateList.withIndex()) {
+            try {
+              val customModel = keyEntry.customModel
+              val customBaseUrl = keyEntry.customBaseUrl
+              val res = callGeminiApi(prompt, effectiveModel, persona, keyEntry.apiKey, conversationHistory, customModel, customBaseUrl)
+              val elapsed = System.currentTimeMillis() - startTime
+              val poolTag = if (candidateList.size > 1) " [Pool: Key ${attemptIdx + 1}/${candidateList.size}]" else ""
+              return@withContext ModelExecutionResult(
+                text = res.first,
+                codeSnippets = res.second,
+                modelUsedTag = "${keyEntry.label.ifBlank { effectiveModel.displayName }}$poolTag (Google Cloud)",
+                executionMode = ExecutionMode.ONLINE_CLOUD,
+                latencyMs = elapsed
+              )
+            } catch (e: Exception) {
+              Log.w(TAG, "Gemini key '${keyEntry.label}' attempt failed: ${e.message}. Rotating to next key in pool...")
+              lastException = e
+            }
+          }
+          val err = lastException?.message ?: "API সংযোগ ব্যর্থ"
+          return@withContext fallbackToOffline(prompt, persona, effectiveModel, startTime, "Gemini API কোটা/রেট লিমিট বা সংযোগ ত্রুটি ($err)। অন-ডিভাইস ইঞ্জিনে সুইচ করা হলো।")
         }
 
         ModelFamily.ANTHROPIC -> {
-          val key = config.anthropicApiKey.trim()
-          if (key.isBlank()) {
+          val activeKeys = getOrderedActiveKeys(ModelFamily.ANTHROPIC, config)
+          val candidateList = if (activeKeys.isNotEmpty()) {
+            activeKeys
+          } else {
+            val defaultKey = config.anthropicApiKey.trim()
+            if (defaultKey.isNotBlank()) {
+              listOf(
+                CustomApiKeyEntry(
+                  id = "default_anthropic",
+                  label = effectiveModel.displayName,
+                  provider = ApiProvider.ANTHROPIC,
+                  apiKey = defaultKey
+                )
+              )
+            } else emptyList()
+          }
+
+          if (candidateList.isEmpty()) {
             return@withContext fallbackToOffline(prompt, persona, effectiveModel, startTime, "Anthropic API Key দেওয়া হয়নি। লোকাল ইঞ্জিনের মাধ্যমে রেসপন্স দেওয়া হলো।")
           }
-          val res = callAnthropicApi(prompt, effectiveModel, persona, key, conversationHistory)
-          val elapsed = System.currentTimeMillis() - startTime
-          ModelExecutionResult(
-            text = res.first,
-            codeSnippets = res.second,
-            modelUsedTag = "${effectiveModel.displayName} (Anthropic Cloud)",
-            executionMode = ExecutionMode.ONLINE_CLOUD,
-            latencyMs = elapsed
-          )
+
+          var lastException: Exception? = null
+          for ((attemptIdx, keyEntry) in candidateList.withIndex()) {
+            try {
+              val customModel = keyEntry.customModel
+              val customBaseUrl = keyEntry.customBaseUrl
+              val res = callAnthropicApi(prompt, effectiveModel, persona, keyEntry.apiKey, conversationHistory, customModel, customBaseUrl)
+              val elapsed = System.currentTimeMillis() - startTime
+              val poolTag = if (candidateList.size > 1) " [Pool: Key ${attemptIdx + 1}/${candidateList.size}]" else ""
+              return@withContext ModelExecutionResult(
+                text = res.first,
+                codeSnippets = res.second,
+                modelUsedTag = "${keyEntry.label.ifBlank { effectiveModel.displayName }}$poolTag (Anthropic Cloud)",
+                executionMode = ExecutionMode.ONLINE_CLOUD,
+                latencyMs = elapsed
+              )
+            } catch (e: Exception) {
+              Log.w(TAG, "Anthropic key '${keyEntry.label}' attempt failed: ${e.message}. Rotating to next key in pool...")
+              lastException = e
+            }
+          }
+          val err = lastException?.message ?: "API সংযোগ ব্যর্থ"
+          return@withContext fallbackToOffline(prompt, persona, effectiveModel, startTime, "Anthropic API কোটা/রেট লিমিট বা সংযোগ ত্রুটি ($err)। লোকাল ইঞ্জিনে উত্তর দেওয়া হলো।")
         }
 
         ModelFamily.OPENAI -> {
-          val key = config.openaiApiKey.trim()
-          if (key.isBlank()) {
+          val activeKeys = getOrderedActiveKeys(ModelFamily.OPENAI, config)
+          val candidateList = if (activeKeys.isNotEmpty()) {
+            activeKeys
+          } else {
+            val defaultKey = config.openaiApiKey.trim()
+            if (defaultKey.isNotBlank()) {
+              listOf(
+                CustomApiKeyEntry(
+                  id = "default_openai",
+                  label = effectiveModel.displayName,
+                  provider = ApiProvider.OPENAI,
+                  apiKey = defaultKey
+                )
+              )
+            } else emptyList()
+          }
+
+          if (candidateList.isEmpty()) {
             return@withContext fallbackToOffline(prompt, persona, effectiveModel, startTime, "OpenAI API Key দেওয়া হয়নি। লোকাল ইঞ্জিনের মাধ্যমে রেসপন্স দেওয়া হলো।")
           }
-          val res = callOpenAiApi(prompt, effectiveModel, persona, key, conversationHistory)
-          val elapsed = System.currentTimeMillis() - startTime
-          ModelExecutionResult(
-            text = res.first,
-            codeSnippets = res.second,
-            modelUsedTag = "${effectiveModel.displayName} (OpenAI Cloud)",
-            executionMode = ExecutionMode.ONLINE_CLOUD,
-            latencyMs = elapsed
-          )
+
+          var lastException: Exception? = null
+          for ((attemptIdx, keyEntry) in candidateList.withIndex()) {
+            try {
+              val customModel = keyEntry.customModel
+              val customBaseUrl = keyEntry.customBaseUrl
+              val res = callOpenAiApi(prompt, effectiveModel, persona, keyEntry.apiKey, conversationHistory, customModel, customBaseUrl)
+              val elapsed = System.currentTimeMillis() - startTime
+              val poolTag = if (candidateList.size > 1) " [Pool: Key ${attemptIdx + 1}/${candidateList.size}]" else ""
+              return@withContext ModelExecutionResult(
+                text = res.first,
+                codeSnippets = res.second,
+                modelUsedTag = "${keyEntry.label.ifBlank { effectiveModel.displayName }}$poolTag (OpenAI Cloud)",
+                executionMode = ExecutionMode.ONLINE_CLOUD,
+                latencyMs = elapsed
+              )
+            } catch (e: Exception) {
+              Log.w(TAG, "OpenAI key '${keyEntry.label}' attempt failed: ${e.message}. Rotating to next key in pool...")
+              lastException = e
+            }
+          }
+          val err = lastException?.message ?: "API সংযোগ ব্যর্থ"
+          return@withContext fallbackToOffline(prompt, persona, effectiveModel, startTime, "OpenAI API কোটা/রেট লিমিট বা সংযোগ ত্রুটি ($err)। লোকাল ইঞ্জিনে উত্তর দেওয়া হলো।")
         }
 
         ModelFamily.DEEPSEEK_CLOUD -> {
-          val key = config.deepseekApiKey.trim()
-          if (key.isBlank()) {
+          val activeKeys = getOrderedActiveKeys(ModelFamily.DEEPSEEK_CLOUD, config)
+          val candidateList = if (activeKeys.isNotEmpty()) {
+            activeKeys
+          } else {
+            val defaultKey = config.deepseekApiKey.trim()
+            if (defaultKey.isNotBlank()) {
+              listOf(
+                CustomApiKeyEntry(
+                  id = "default_deepseek",
+                  label = effectiveModel.displayName,
+                  provider = ApiProvider.DEEPSEEK,
+                  apiKey = defaultKey
+                )
+              )
+            } else emptyList()
+          }
+
+          if (candidateList.isEmpty()) {
             return@withContext fallbackToOffline(prompt, persona, effectiveModel, startTime, "DeepSeek API Key দেওয়া হয়নি। অন-ডিভাইস R1 রিজনিং ইঞ্জিনে উত্তর দেওয়া হলো।")
           }
-          val res = callDeepSeekCloudApi(prompt, effectiveModel, persona, key, conversationHistory)
-          val elapsed = System.currentTimeMillis() - startTime
-          ModelExecutionResult(
-            text = res.first,
-            codeSnippets = res.second,
-            modelUsedTag = "${effectiveModel.displayName} (DeepSeek Cloud)",
-            executionMode = ExecutionMode.ONLINE_CLOUD,
-            thoughtProcess = res.third,
-            latencyMs = elapsed
-          )
+
+          var lastException: Exception? = null
+          for ((attemptIdx, keyEntry) in candidateList.withIndex()) {
+            try {
+              val customModel = keyEntry.customModel
+              val customBaseUrl = keyEntry.customBaseUrl
+              val res = callDeepSeekCloudApi(prompt, effectiveModel, persona, keyEntry.apiKey, conversationHistory, customModel, customBaseUrl)
+              val elapsed = System.currentTimeMillis() - startTime
+              val poolTag = if (candidateList.size > 1) " [Pool: Key ${attemptIdx + 1}/${candidateList.size}]" else ""
+              return@withContext ModelExecutionResult(
+                text = res.first,
+                codeSnippets = res.second,
+                modelUsedTag = "${keyEntry.label.ifBlank { effectiveModel.displayName }}$poolTag (DeepSeek Cloud)",
+                executionMode = ExecutionMode.ONLINE_CLOUD,
+                thoughtProcess = res.third,
+                latencyMs = elapsed
+              )
+            } catch (e: Exception) {
+              Log.w(TAG, "DeepSeek key '${keyEntry.label}' attempt failed: ${e.message}. Rotating to next key in pool...")
+              lastException = e
+            }
+          }
+          val err = lastException?.message ?: "API সংযোগ ব্যর্থ"
+          return@withContext fallbackToOffline(prompt, persona, effectiveModel, startTime, "DeepSeek API কোটা/রেট লিমিট বা সংযোগ ত্রুটি ($err)। অন-ডিভাইস R1 ইঞ্জিনে উত্তর দেওয়া হলো।")
         }
 
         ModelFamily.OLLAMA_LOCAL -> {
+          val activeOllamaKey = config.customApiKeys.firstOrNull { it.isActive && it.provider.family == ModelFamily.OLLAMA_LOCAL }
+          val baseUrl = activeOllamaKey?.customBaseUrl?.ifBlank { null } ?: config.ollamaBaseUrl
           // Attempt real Ollama server connection
           try {
-            val res = callOllamaLocalApi(prompt, effectiveModel, persona, config.ollamaBaseUrl, conversationHistory)
+            val res = callOllamaLocalApi(prompt, effectiveModel, persona, baseUrl, conversationHistory)
             val elapsed = System.currentTimeMillis() - startTime
+            val modelName = activeOllamaKey?.label?.ifBlank { null } ?: effectiveModel.displayName
             ModelExecutionResult(
               text = res.first,
               codeSnippets = res.second,
-              modelUsedTag = "${effectiveModel.displayName} (Ollama Local)",
+              modelUsedTag = "$modelName (Ollama Local)",
               executionMode = ExecutionMode.LOCAL_OLLAMA,
               thoughtProcess = res.third,
               latencyMs = elapsed
             )
           } catch (e: Exception) {
-            Log.w(TAG, "Ollama local server unreachable at ${config.ollamaBaseUrl}, using on-device emulation", e)
-            fallbackToOffline(prompt, persona, effectiveModel, startTime, "Ollama সার্ভার (${config.ollamaBaseUrl}) অফলাইন। অন-ডিভাইস এমুলেশন ইঞ্জিনে কাজ করছে।")
+            Log.w(TAG, "Ollama local server unreachable at $baseUrl, using on-device emulation", e)
+            fallbackToOffline(prompt, persona, effectiveModel, startTime, "Ollama সার্ভার ($baseUrl) অফলাইন। অন-ডিভাইস এমুলেশন ইঞ্জিনে কাজ করছে।")
           }
         }
 
@@ -181,10 +319,15 @@ object MultiModelAiRouter {
     model: SupportedAiModel,
     persona: AiPersona,
     apiKey: String,
-    history: List<Pair<String, Boolean>>
+    history: List<Pair<String, Boolean>>,
+    customModel: String = "",
+    customBaseUrl: String = ""
   ): Pair<String, List<CodeSnippet>> {
-    val modelTag = if (model == SupportedAiModel.GEMINI_PRO) "gemini-3.1-pro-preview" else "gemini-3.5-flash"
-    val url = "https://generativelanguage.googleapis.com/v1beta/models/$modelTag:generateContent?key=$apiKey"
+    val modelTag = if (customModel.isNotBlank()) customModel
+      else if (model == SupportedAiModel.GEMINI_PRO) "gemini-1.5-pro"
+      else "gemini-1.5-flash"
+    val base = if (customBaseUrl.isNotBlank()) customBaseUrl.trimEnd('/') else "https://generativelanguage.googleapis.com"
+    val url = "$base/v1beta/models/$modelTag:generateContent?key=$apiKey"
 
     val systemPrompt = buildSystemPrompt(persona, model)
     val rootJson = JSONObject().apply {
@@ -212,7 +355,8 @@ object MultiModelAiRouter {
 
     val response = httpClient.newCall(req).execute()
     if (!response.isSuccessful) {
-      throw IllegalStateException("Gemini API Error code: ${response.code}")
+      val err = response.body?.string()?.take(150) ?: ""
+      throw IllegalStateException("Gemini API Error code: ${response.code} ($err)")
     }
 
     val resText = response.body?.string() ?: ""
@@ -230,13 +374,17 @@ object MultiModelAiRouter {
     model: SupportedAiModel,
     persona: AiPersona,
     apiKey: String,
-    history: List<Pair<String, Boolean>>
+    history: List<Pair<String, Boolean>>,
+    customModel: String = "",
+    customBaseUrl: String = ""
   ): Pair<String, List<CodeSnippet>> {
-    val url = "https://api.anthropic.com/v1/messages"
+    val base = if (customBaseUrl.isNotBlank()) customBaseUrl.trimEnd('/') else "https://api.anthropic.com/v1"
+    val url = if (base.endsWith("/messages")) base else "$base/messages"
+    val modelTag = if (customModel.isNotBlank()) customModel else model.modelTag
     val systemPrompt = buildSystemPrompt(persona, model)
 
     val root = JSONObject().apply {
-      put("model", model.modelTag) // claude-3-5-sonnet-20241022
+      put("model", modelTag)
       put("max_tokens", 4096)
       put("system", systemPrompt)
 
@@ -265,7 +413,8 @@ object MultiModelAiRouter {
 
     val response = httpClient.newCall(req).execute()
     if (!response.isSuccessful) {
-      throw IllegalStateException("Anthropic Claude API Error code: ${response.code}")
+      val err = response.body?.string()?.take(150) ?: ""
+      throw IllegalStateException("Anthropic Claude API Error code: ${response.code} ($err)")
     }
 
     val resText = response.body?.string() ?: ""
@@ -276,15 +425,19 @@ object MultiModelAiRouter {
     return extractCodeSnippets(text)
   }
 
-  // --- 3. OPENAI GPT-4O CALL ---
+  // --- 3. OPENAI GPT-4O / COMPATIBLE CALL ---
   private fun callOpenAiApi(
     prompt: String,
     model: SupportedAiModel,
     persona: AiPersona,
     apiKey: String,
-    history: List<Pair<String, Boolean>>
+    history: List<Pair<String, Boolean>>,
+    customModel: String = "",
+    customBaseUrl: String = ""
   ): Pair<String, List<CodeSnippet>> {
-    val url = "https://api.openai.com/v1/chat/completions"
+    val base = if (customBaseUrl.isNotBlank()) customBaseUrl.trimEnd('/') else "https://api.openai.com/v1"
+    val url = if (base.endsWith("/chat/completions")) base else "$base/chat/completions"
+    val modelTag = if (customModel.isNotBlank()) customModel else model.modelTag
     val systemPrompt = buildSystemPrompt(persona, model)
 
     val messages = JSONArray().apply {
@@ -305,7 +458,7 @@ object MultiModelAiRouter {
     }
 
     val root = JSONObject().apply {
-      put("model", model.modelTag) // gpt-4o
+      put("model", modelTag)
       put("messages", messages)
       put("temperature", 0.7)
     }
@@ -319,7 +472,8 @@ object MultiModelAiRouter {
 
     val response = httpClient.newCall(req).execute()
     if (!response.isSuccessful) {
-      throw IllegalStateException("OpenAI API Error code: ${response.code}")
+      val err = response.body?.string()?.take(150) ?: ""
+      throw IllegalStateException("OpenAI API Error code: ${response.code} ($err)")
     }
 
     val resText = response.body?.string() ?: ""
@@ -336,9 +490,13 @@ object MultiModelAiRouter {
     model: SupportedAiModel,
     persona: AiPersona,
     apiKey: String,
-    history: List<Pair<String, Boolean>>
+    history: List<Pair<String, Boolean>>,
+    customModel: String = "",
+    customBaseUrl: String = ""
   ): Triple<String, List<CodeSnippet>, String?> {
-    val url = "https://api.deepseek.com/chat/completions"
+    val base = if (customBaseUrl.isNotBlank()) customBaseUrl.trimEnd('/') else "https://api.deepseek.com"
+    val url = if (base.endsWith("/chat/completions")) base else "$base/chat/completions"
+    val modelTag = if (customModel.isNotBlank()) customModel else model.modelTag
     val systemPrompt = buildSystemPrompt(persona, model)
 
     val messages = JSONArray().apply {
@@ -359,7 +517,7 @@ object MultiModelAiRouter {
     }
 
     val root = JSONObject().apply {
-      put("model", model.modelTag) // deepseek-chat or deepseek-reasoner
+      put("model", modelTag) // deepseek-chat or deepseek-reasoner or custom model
       put("messages", messages)
     }
 
@@ -372,7 +530,8 @@ object MultiModelAiRouter {
 
     val response = httpClient.newCall(req).execute()
     if (!response.isSuccessful) {
-      throw IllegalStateException("DeepSeek Cloud Error code: ${response.code}")
+      val err = response.body?.string()?.take(150) ?: ""
+      throw IllegalStateException("DeepSeek Cloud Error code: ${response.code} ($err)")
     }
 
     val resText = response.body?.string() ?: ""

@@ -80,10 +80,12 @@ fun DualEngineDiagnosticsView(
   ) {
     val selectedModel by viewModel.selectedModel.collectAsState()
     var showModelSheet by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var sheetTab by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(0) }
 
     if (showModelSheet) {
       ModelSelectorBottomSheet(
         viewModel = viewModel,
+        initialTab = sheetTab,
         onDismiss = { showModelSheet = false }
       )
     }
@@ -401,6 +403,11 @@ fun DualEngineDiagnosticsView(
         }
       }
     }
+
+    Spacer(modifier = Modifier.height(18.dp))
+
+    // Unlimited User-Managed API Key Vault
+    ApiKeyVaultView(viewModel = viewModel)
 
     Spacer(modifier = Modifier.height(14.dp))
 

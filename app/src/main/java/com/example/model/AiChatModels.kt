@@ -17,6 +17,89 @@ enum class ModelFamily(val title: String) {
   CHRONO_EDGE("CHRONO Autonomous")
 }
 
+enum class ApiProvider(
+  val displayName: String,
+  val family: ModelFamily,
+  val defaultBaseUrl: String,
+  val placeholderKey: String,
+  val defaultModelTag: String,
+  val iconKey: String
+) {
+  GOOGLE_GEMINI(
+    displayName = "Google Gemini",
+    family = ModelFamily.GOOGLE,
+    defaultBaseUrl = "https://generativelanguage.googleapis.com",
+    placeholderKey = "AQ.Ab8... or AIzaSy...",
+    defaultModelTag = "gemini-1.5-flash",
+    iconKey = "google"
+  ),
+  OPENAI(
+    displayName = "OpenAI",
+    family = ModelFamily.OPENAI,
+    defaultBaseUrl = "https://api.openai.com/v1",
+    placeholderKey = "sk-proj-...",
+    defaultModelTag = "gpt-4o",
+    iconKey = "openai"
+  ),
+  ANTHROPIC(
+    displayName = "Anthropic Claude",
+    family = ModelFamily.ANTHROPIC,
+    defaultBaseUrl = "https://api.anthropic.com/v1",
+    placeholderKey = "sk-ant-...",
+    defaultModelTag = "claude-3-5-sonnet-20241022",
+    iconKey = "claude"
+  ),
+  DEEPSEEK(
+    displayName = "DeepSeek Cloud",
+    family = ModelFamily.DEEPSEEK_CLOUD,
+    defaultBaseUrl = "https://api.deepseek.com",
+    placeholderKey = "sk-...",
+    defaultModelTag = "deepseek-chat",
+    iconKey = "deepseek"
+  ),
+  OPENROUTER(
+    displayName = "OpenRouter",
+    family = ModelFamily.OPENAI,
+    defaultBaseUrl = "https://openrouter.ai/api/v1",
+    placeholderKey = "sk-or-...",
+    defaultModelTag = "auto",
+    iconKey = "openrouter"
+  ),
+  OLLAMA_LOCAL_SERVER(
+    displayName = "Ollama Local Engine",
+    family = ModelFamily.OLLAMA_LOCAL,
+    defaultBaseUrl = "http://10.0.2.2:11434",
+    placeholderKey = "None / Custom Token",
+    defaultModelTag = "qwen2.5-coder:7b",
+    iconKey = "ollama"
+  ),
+  CUSTOM_ENDPOINT(
+    displayName = "Custom OpenAI Compatible",
+    family = ModelFamily.OPENAI,
+    defaultBaseUrl = "https://api.yourdomain.com/v1",
+    placeholderKey = "Custom API Bearer Token",
+    defaultModelTag = "custom-model",
+    iconKey = "custom"
+  );
+
+  companion object {
+    fun fromString(value: String): ApiProvider {
+      return values().firstOrNull { it.name.equals(value, ignoreCase = true) } ?: GOOGLE_GEMINI
+    }
+  }
+}
+
+data class CustomApiKeyEntry(
+  val id: String = UUID.randomUUID().toString(),
+  val label: String,
+  val provider: ApiProvider,
+  val apiKey: String,
+  val customModel: String = "",
+  val customBaseUrl: String = "",
+  val isActive: Boolean = true,
+  val createdAt: Long = System.currentTimeMillis()
+)
+
 enum class SupportedAiModel(
   val id: String,
   val displayName: String,

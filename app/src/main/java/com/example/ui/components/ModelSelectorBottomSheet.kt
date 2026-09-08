@@ -15,8 +15,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
@@ -74,15 +76,19 @@ import com.example.ui.theme.ChronoTextSecondary
 @Composable
 fun ModelSelectorBottomSheet(
   viewModel: ChatViewModel,
+  initialTab: Int = 0,
   onDismiss: () -> Unit
 ) {
   val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
   val selectedModel by viewModel.selectedModel.collectAsState()
   val config by viewModel.modelConfig.collectAsState()
 
-  var selectedTab by remember { mutableStateOf(0) } // 0: Online Cloud, 1: Offline Local, 2: API Keys
+  var selectedTab by remember { mutableStateOf(initialTab) } // 0: Online Cloud, 1: Offline Local, 2: API Keys
 
-  var tempGeminiKey by remember(config.geminiApiKey) { mutableStateOf(config.geminiApiKey) }
+  val effectiveGeminiKey = viewModel.configManager.getEffectiveGeminiKey()
+  var tempGeminiKey by remember(config.geminiApiKey, effectiveGeminiKey) {
+    mutableStateOf(config.geminiApiKey.ifBlank { effectiveGeminiKey })
+  }
   var tempOpenaiKey by remember(config.openaiApiKey) { mutableStateOf(config.openaiApiKey) }
   var tempAnthropicKey by remember(config.anthropicApiKey) { mutableStateOf(config.anthropicApiKey) }
   var tempDeepseekKey by remember(config.deepseekApiKey) { mutableStateOf(config.deepseekApiKey) }
@@ -177,7 +183,7 @@ fun ModelSelectorBottomSheet(
           onClick = { selectedTab = 2 },
           text = {
             Text(
-              text = "🔑 API Keys & Hub",
+              text = "🔑 API Vault (${config.customApiKeys.size})",
               fontSize = 12.sp,
               fontWeight = if (selectedTab == 2) FontWeight.Bold else FontWeight.Normal
             )
@@ -190,7 +196,7 @@ fun ModelSelectorBottomSheet(
       when (selectedTab) {
         0 -> {
           // Online Cloud Models List
-          LazyColumn(modifier = Modifier.fillMaxWidth().height(380.dp)) {
+          LazyColumn(modifier = Modifier.fillMaxWidth().height(420.dp)) {
             items(SupportedAiModel.onlineCloudModels) { model ->
               ModelCardItem(
                 model = model,
@@ -206,7 +212,7 @@ fun ModelSelectorBottomSheet(
         }
         1 -> {
           // Offline Local Models List
-          LazyColumn(modifier = Modifier.fillMaxWidth().height(380.dp)) {
+          LazyColumn(modifier = Modifier.fillMaxWidth().height(420.dp)) {
             item {
               // Smart Autonomous Card
               ModelCardItem(
@@ -233,94 +239,132 @@ fun ModelSelectorBottomSheet(
           }
         }
         2 -> {
-          // API Keys & Configuration Tab
+          // Unlimited API Key Vault Tab
+          var showQuickDefaults by remember { mutableStateOf(false) }
+
           Column(
             modifier = Modifier
               .fillMaxWidth()
-              .height(380.dp)
+              .height(460.dp)
+              .verticalScroll(rememberScrollState())
           ) {
-            LazyColumn(modifier = Modifier.weight(1f)) {
-              item {
-                Text(
-                  text = "Custom Cloud Keys (Optional - On-Device fallback ready):",
-                  fontSize = 11.sp,
-                  color = ChronoTextSecondary,
-                  fontWeight = FontWeight.SemiBold
-                )
-                Spacer(modifier = Modifier.height(8.dp))
+            ApiKeyVaultView(viewModel = viewModel)
 
-                ApiKeyInputField(
-                  label = "Google Gemini API Key",
-                  value = tempGeminiKey,
-                  onValueChange = { tempGeminiKey = it },
-                  placeholder = "AIzaSy..."
-                )
-                Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-                ApiKeyInputField(
-                  label = "OpenAI API Key (GPT-4o)",
-                  value = tempOpenaiKey,
-                  onValueChange = { tempOpenaiKey = it },
-                  placeholder = "sk-proj-..."
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                ApiKeyInputField(
-                  label = "Anthropic API Key (Claude 3.5)",
-                  value = tempAnthropicKey,
-                  onValueChange = { tempAnthropicKey = it },
-                  placeholder = "sk-ant-..."
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                ApiKeyInputField(
-                  label = "DeepSeek API Key (V3 / R1)",
-                  value = tempDeepseekKey,
-                  onValueChange = { tempDeepseekKey = it },
-                  placeholder = "sk-..."
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                ApiKeyInputField(
-                  label = "Ollama Host URL (Default: 10.0.2.2:11434)",
-                  value = tempOllamaUrl,
-                  onValueChange = { tempOllamaUrl = it },
-                  placeholder = "http://10.0.2.2:11434",
-                  isPassword = false
-                )
-              }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            if (saveSuccessMessage) {
-              Text(
-                text = "✓ সেটিংস ও এপিআই কি সফলভাবে সংরক্ষিত হয়েছে!",
-                fontSize = 12.sp,
-                color = ChronoAccent,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 6.dp)
-              )
-            }
-
-            Button(
-              onClick = {
-                viewModel.updateApiKeys(
-                  geminiKey = tempGeminiKey,
-                  openaiKey = tempOpenaiKey,
-                  anthropicKey = tempAnthropicKey,
-                  deepseekKey = tempDeepseekKey,
-                  ollamaUrl = tempOllamaUrl
-                )
-                saveSuccessMessage = true
-              },
-              colors = ButtonDefaults.buttonColors(containerColor = ChronoPrimary),
+            // Quick default keys expandable card
+            Card(
               shape = RoundedCornerShape(10.dp),
-              modifier = Modifier.fillMaxWidth().testTag("save_api_keys_button")
+              colors = CardDefaults.cardColors(containerColor = ChronoCardSurface),
+              border = BorderStroke(0.8.dp, ChronoCardBorder),
+              modifier = Modifier
+                .fillMaxWidth()
+                .clickable { showQuickDefaults = !showQuickDefaults }
             ) {
-              Icon(imageVector = Icons.Default.Save, contentDescription = null, tint = Color(0xFF003544))
-              Spacer(modifier = Modifier.width(8.dp))
-              Text("Save Configuration", color = Color(0xFF003544), fontWeight = FontWeight.Bold)
+              Column(modifier = Modifier.padding(12.dp)) {
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                      imageVector = Icons.Default.Settings,
+                      contentDescription = null,
+                      tint = ChronoTextSecondary,
+                      modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                      text = "কুইক গ্লোবাল প্রোভাইডার কি (Global Defaults)",
+                      fontSize = 12.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = ChronoTextPrimary
+                    )
+                  }
+                  Text(
+                    text = if (showQuickDefaults) "▲ বন্ধ করুন" else "▼ দেখুন",
+                    fontSize = 11.sp,
+                    color = ChronoPrimary
+                  )
+                }
+
+                if (showQuickDefaults) {
+                  Spacer(modifier = Modifier.height(12.dp))
+
+                  ApiKeyInputField(
+                    label = "Google Gemini API Key (Default)",
+                    value = tempGeminiKey,
+                    onValueChange = { tempGeminiKey = it },
+                    placeholder = "AIzaSy..."
+                  )
+                  Spacer(modifier = Modifier.height(8.dp))
+
+                  ApiKeyInputField(
+                    label = "OpenAI API Key (GPT-4o)",
+                    value = tempOpenaiKey,
+                    onValueChange = { tempOpenaiKey = it },
+                    placeholder = "sk-proj-..."
+                  )
+                  Spacer(modifier = Modifier.height(8.dp))
+
+                  ApiKeyInputField(
+                    label = "Anthropic API Key (Claude 3.5)",
+                    value = tempAnthropicKey,
+                    onValueChange = { tempAnthropicKey = it },
+                    placeholder = "sk-ant-..."
+                  )
+                  Spacer(modifier = Modifier.height(8.dp))
+
+                  ApiKeyInputField(
+                    label = "DeepSeek API Key (V3 / R1)",
+                    value = tempDeepseekKey,
+                    onValueChange = { tempDeepseekKey = it },
+                    placeholder = "sk-..."
+                  )
+                  Spacer(modifier = Modifier.height(8.dp))
+
+                  ApiKeyInputField(
+                    label = "Ollama Host URL (Default: 10.0.2.2:11434)",
+                    value = tempOllamaUrl,
+                    onValueChange = { tempOllamaUrl = it },
+                    placeholder = "http://10.0.2.2:11434",
+                    isPassword = false
+                  )
+
+                  Spacer(modifier = Modifier.height(12.dp))
+
+                  if (saveSuccessMessage) {
+                    Text(
+                      text = "✓ সেটিংস ও এপিআই কি সফলভাবে সংরক্ষিত হয়েছে!",
+                      fontSize = 12.sp,
+                      color = ChronoAccent,
+                      fontWeight = FontWeight.Bold,
+                      modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                  }
+
+                  Button(
+                    onClick = {
+                      viewModel.updateApiKeys(
+                        geminiKey = tempGeminiKey,
+                        openaiKey = tempOpenaiKey,
+                        anthropicKey = tempAnthropicKey,
+                        deepseekKey = tempDeepseekKey,
+                        ollamaUrl = tempOllamaUrl
+                      )
+                      saveSuccessMessage = true
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = ChronoPrimary),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth().testTag("save_api_keys_button")
+                  ) {
+                    Icon(imageVector = Icons.Default.Save, contentDescription = null, tint = Color(0xFF003544))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Save Global Defaults", color = Color(0xFF003544), fontWeight = FontWeight.Bold)
+                  }
+                }
+              }
             }
           }
         }
