@@ -131,6 +131,36 @@ fun ChatMessageItem(
             Spacer(modifier = Modifier.height(8.dp))
           }
 
+          // Attached Thought Process / Reasoning Chain (DeepSeek-R1 etc.)
+          message.thoughtProcess?.let { thought ->
+            Spacer(modifier = Modifier.height(8.dp))
+            Surface(
+              shape = RoundedCornerShape(8.dp),
+              color = Color(0xFF1E1B4B).copy(alpha = 0.5f),
+              border = BorderStroke(0.8.dp, Color(0xFF818CF8).copy(alpha = 0.4f)),
+              modifier = Modifier.fillMaxWidth()
+            ) {
+              Column(modifier = Modifier.padding(10.dp)) {
+                Text(
+                  text = "🧠 Reasoning Chain (<think>):",
+                  fontSize = 11.sp,
+                  fontFamily = FontFamily.Monospace,
+                  fontWeight = FontWeight.Bold,
+                  color = Color(0xFFA5B4FC)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                  text = thought,
+                  fontSize = 12.sp,
+                  color = Color(0xFFE0E7FF),
+                  fontFamily = FontFamily.Monospace,
+                  lineHeight = 16.sp
+                )
+              }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+          }
+
           // Message Body Text
           Text(
             text = message.text,

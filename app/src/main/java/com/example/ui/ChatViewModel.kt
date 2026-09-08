@@ -6,18 +6,27 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.ai.OfflineAiEngine
-import com.example.ai.OnlineGeminiService
+import com.example.ai.ModelConfig
+import com.example.ai.ModelConfigManager
+import com.example.ai.MultiModelAiRouter
 import com.example.model.AiEngineType
 import com.example.model.AiPersona
 import com.example.model.ChatMessage
 import com.example.model.CodeSnippet
+import com.example.model.ExecutionMode
+import com.example.model.SupportedAiModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
+
+  val configManager = ModelConfigManager(application)
+  val modelConfig: StateFlow<ModelConfig> = configManager.config
+
+  private val _selectedModel = MutableStateFlow(configManager.config.value.selectedModel)
+  val selectedModel: StateFlow<SupportedAiModel> = _selectedModel.asStateFlow()
 
   private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
   val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
@@ -34,7 +43,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
   private val _isDeviceOnline = MutableStateFlow(false)
   val isDeviceOnline: StateFlow<Boolean> = _isDeviceOnline.asStateFlow()
 
-  private val _lastUsedEngine = MutableStateFlow("Offline Engine Ready")
+  private val _lastUsedEngine = MutableStateFlow("CHRONO Multi-Model Matrix Ready")
   val lastUsedEngine: StateFlow<String> = _lastUsedEngine.asStateFlow()
 
   init {
@@ -43,27 +52,59 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val initialMessage = ChatMessage(
       text = """
         আসসালামু আলাইকুম / হ্যালো! 👋
-        আমি **CHRONO AI**—একটি নতুন প্রজন্মের এআই মডেল ও কোডিং অ্যাসিস্ট্যান্ট।
+        আমি **CHRONO AI**—একটি পূর্ণাঙ্গ মাল্টি-মডেল সুপার এআই আর্কিটেকচার প্ল্যাটফর্ম।
         
-        আমি আপনার সাথে সম্পূর্ণ **মানুষের মতো স্বাভাবিক ভাষায়** কথা বলতে পারি এবং যেকোনো বিষয়ের **কোড লিখে ও বুঝিয়ে দিতে পারি**।
+        🌐 **অনলাইন ক্লাউড এপিআই সমর্থিত:**
+        • **Claude 3.5 Sonnet** (Anthropic)
+        • **GPT-4o** (OpenAI)
+        • **Gemini 1.5 Pro / Flash** (Google Cloud)
+        • **DeepSeek-V3 / DeepSeek-R1** (DeepSeek Cloud)
         
-        ⚡ **আমার অন্যতম বিশেষত্ব:**
-        • 🌐 **অনলাইন মোড:** Google Gemini 3.5 দিয়ে লাইভ ক্লাউড ইন্টেলিজেন্স।
-        • 📱 **অফলাইন মোড:** ইন্টারনেট ছাড়া সম্পূর্ণ অফলাইনে নিজস্ব অন-ডিভাইস ইঞ্জিনের মাধ্যমে ঝড়ের গতিতে উত্তর ও কোড জেনারেশন!
+        💻 **অফলাইন লোকাল ও অন-ডিভাইস ইঞ্জিন:**
+        • **Qwen 2.5 Coder** (7B / 14B)
+        • **DeepSeek-R1 Distill** (8B / Qwen)
+        • **Llama 3.1 8B** & **Mistral 7B / Codestral 22B**
+        • **CHRONO Autonomous Edge Core** (ইন্টারনেট বা সার্ভার ছাড়াই ১০০% অফলাইন)
         
-        নিচের যেকোনো প্রম্পটে ক্লিক করুন অথবা বাংলায়/ইংরেজিতে যেকোনো প্রশ্ন লিখুন!
+        উপরের মডেল মেনু থেকে যেকোনো মডেল বেছে নিন বা বাংলায়/ইংরেজিতে প্রশ্ন করুন!
       """.trimIndent(),
       isUser = false,
-      engineUsed = "CHRONO Dual-Engine",
+      engineUsed = "CHRONO Multi-Model Hub",
       codeBlocks = listOf(
         CodeSnippet(
-          language = "python",
-          code = "# Welcome to CHRONO AI\ndef greet_human(name: str):\n    return f'Hello {name}! Ready to write clean code today?'\n\nprint(greet_human('Friend'))",
-          explanation = "ওয়েলকাম কোড স্নিপেট: পাইথনে ফাংশন দিয়ে বন্ধুসুলভ সম্ভাষণ।"
+          language = "kotlin",
+          code = """
+            // CHRONO Multi-Model Unified Execution
+            val selectedAi = SupportedAiModel.CLAUDE_35_SONNET
+            println("Active Engine: " + selectedAi.displayName + " [" + selectedAi.provider + "]")
+          """.trimIndent(),
+          explanation = "মাল্টি-মডেল আর্কিটেকচার: ক্লাউড এবং অন-ডিভাইস লোকাল মডেলগুলোর সমন্বয়।"
         )
       )
     )
     _messages.value = listOf(initialMessage)
+  }
+
+  fun setSelectedModel(model: SupportedAiModel) {
+    _selectedModel.value = model
+    configManager.setSelectedModel(model)
+
+    // Sync legacy engineType for backwards compatibility
+    _engineType.value = when (model.mode) {
+      ExecutionMode.ONLINE_CLOUD -> AiEngineType.ONLINE_GEMINI
+      ExecutionMode.LOCAL_OLLAMA, ExecutionMode.ON_DEVICE_EDGE -> AiEngineType.OFFLINE_CORE
+    }
+  }
+
+  fun updateApiKeys(
+    geminiKey: String? = null,
+    openaiKey: String? = null,
+    anthropicKey: String? = null,
+    deepseekKey: String? = null,
+    ollamaUrl: String? = null,
+    autoFallback: Boolean? = null
+  ) {
+    configManager.updateApiKeys(geminiKey, openaiKey, anthropicKey, deepseekKey, ollamaUrl, autoFallback)
   }
 
   fun setEngineType(type: AiEngineType) {
@@ -103,57 +144,32 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     _isGenerating.value = true
 
     viewModelScope.launch {
-      val startTime = System.currentTimeMillis()
-      val isOnline = checkNetworkStatus()
-      val selectedEngine = _engineType.value
+      val currentModel = _selectedModel.value
       val currentPersona = _persona.value
+      val currentConfig = configManager.config.value
 
-      val shouldUseOnline = when (selectedEngine) {
-        AiEngineType.ONLINE_GEMINI -> true
-        AiEngineType.OFFLINE_CORE -> false
-        AiEngineType.AUTO_HYBRID -> isOnline
-      }
+      // Collect past dialogue turns for conversational context
+      val history = _messages.value.dropLast(1).map { Pair(it.text, it.isUser) }
 
-      var engineTag = if (shouldUseOnline) "Google Gemini 3.5" else "On-Device Offline Engine"
+      val executionResult = MultiModelAiRouter.execute(
+        prompt = query,
+        model = currentModel,
+        persona = currentPersona,
+        config = currentConfig,
+        conversationHistory = history
+      )
 
-      if (shouldUseOnline) {
-        // Collect past dialogue turns for conversational context
-        val history = _messages.value.dropLast(1).map { Pair(it.text, it.isUser) }
-        val onlineResult = OnlineGeminiService.generateContent(query, currentPersona, history)
-
-        if (onlineResult.isSuccess) {
-          val (responseText, snippets) = onlineResult.getOrThrow()
-          val latency = System.currentTimeMillis() - startTime
-          _lastUsedEngine.value = "Gemini 3.5 (${latency}ms)"
-
-          val aiMessage = ChatMessage(
-            text = responseText,
-            isUser = false,
-            engineUsed = "Gemini 3.5 Flash (Online)",
-            codeBlocks = snippets,
-            latencyMs = latency
-          )
-          _messages.value = _messages.value + aiMessage
-          _isGenerating.value = false
-          return@launch
-        } else {
-          // Graceful fallback to Offline Engine
-          engineTag = "Offline Engine (Fallback: Online Unavailable)"
-        }
-      }
-
-      // Execute on Offline AI Engine
-      val (offlineText, offlineSnippets) = OfflineAiEngine.generateResponse(query, currentPersona)
-      val latency = System.currentTimeMillis() - startTime
-      _lastUsedEngine.value = "CHRONO Offline Core (${latency}ms)"
+      _lastUsedEngine.value = "${executionResult.modelUsedTag} (${executionResult.latencyMs}ms)"
 
       val aiMessage = ChatMessage(
-        text = offlineText,
+        text = executionResult.text,
         isUser = false,
-        engineUsed = if (shouldUseOnline) "Offline Core (Auto-Fallback)" else "CHRONO On-Device (Offline)",
-        codeBlocks = offlineSnippets,
-        latencyMs = latency
+        engineUsed = executionResult.modelUsedTag,
+        codeBlocks = executionResult.codeSnippets,
+        latencyMs = executionResult.latencyMs,
+        thoughtProcess = executionResult.thoughtProcess
       )
+
       _messages.value = _messages.value + aiMessage
       _isGenerating.value = false
     }
@@ -161,6 +177,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
   fun clearChat() {
     _messages.value = emptyList()
-    sendMessage("কেমন আছো? তোমার কাজ কী?")
+    sendMessage("কেমন আছো? তোমার সকল মডেলের ক্ষমতা কী?")
   }
 }
+

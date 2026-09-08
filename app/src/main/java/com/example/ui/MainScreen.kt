@@ -90,6 +90,7 @@ fun MainScreen(
 
   val isOnline by chatViewModel.isDeviceOnline.collectAsState()
   val engineType by chatViewModel.engineType.collectAsState()
+  val selectedModel by chatViewModel.selectedModel.collectAsState()
 
   Scaffold(
     modifier = modifier.fillMaxSize(),
@@ -124,22 +125,22 @@ fun MainScreen(
                 Spacer(modifier = Modifier.width(6.dp))
                 Surface(
                   shape = RoundedCornerShape(4.dp),
-                  color = if (engineType == AiEngineType.OFFLINE_CORE) Color(0xFFF59E0B).copy(alpha = 0.15f) else ChronoPrimary.copy(alpha = 0.15f),
-                  border = BorderStroke(0.5.dp, if (engineType == AiEngineType.OFFLINE_CORE) Color(0xFFF59E0B) else ChronoPrimary)
+                  color = if (selectedModel.mode == com.example.model.ExecutionMode.ONLINE_CLOUD) ChronoPrimary.copy(alpha = 0.15f) else Color(0xFFF59E0B).copy(alpha = 0.15f),
+                  border = BorderStroke(0.5.dp, if (selectedModel.mode == com.example.model.ExecutionMode.ONLINE_CLOUD) ChronoPrimary else Color(0xFFF59E0B))
                 ) {
                   Text(
-                    text = if (engineType == AiEngineType.OFFLINE_CORE) "OFFLINE" else "HYBRID",
+                    text = selectedModel.displayName.take(15),
                     fontSize = 8.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
-                    color = if (engineType == AiEngineType.OFFLINE_CORE) Color(0xFFF59E0B) else ChronoPrimary,
+                    color = if (selectedModel.mode == com.example.model.ExecutionMode.ONLINE_CLOUD) ChronoPrimary else Color(0xFFF59E0B),
                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                   )
                 }
               }
               Text(
-                text = "Human Dialogue & Coding Model (Online/Offline)",
-                fontSize = 11.sp,
+                text = "${selectedModel.provider} • ${selectedModel.mode.badge}",
+                fontSize = 10.sp,
                 color = ChronoTextSecondary
               )
             }

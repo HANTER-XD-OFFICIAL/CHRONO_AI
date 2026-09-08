@@ -86,9 +86,10 @@ fun ChatScreen(
   val engineType by viewModel.engineType.collectAsState()
   val persona by viewModel.persona.collectAsState()
   val isOnline by viewModel.isDeviceOnline.collectAsState()
+  val selectedModel by viewModel.selectedModel.collectAsState()
 
   var inputText by remember { mutableStateOf("") }
-  var showEngineMenu by remember { mutableStateOf(false) }
+  var showModelSelectorSheet by remember { mutableStateOf(false) }
   var showPersonaMenu by remember { mutableStateOf(false) }
 
   val listState = rememberLazyListState()
@@ -97,6 +98,13 @@ fun ChatScreen(
     if (messages.isNotEmpty()) {
       listState.animateScrollToItem(messages.size - 1)
     }
+  }
+
+  if (showModelSelectorSheet) {
+    ModelSelectorBottomSheet(
+      viewModel = viewModel,
+      onDismiss = { showModelSelectorSheet = false }
+    )
   }
 
   Column(
@@ -118,60 +126,40 @@ fun ChatScreen(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
       ) {
-        // Engine Selector Pill
-        Box {
-          Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = ChronoCardSurface,
-            border = BorderStroke(1.dp, ChronoPrimary.copy(alpha = 0.5f)),
-            modifier = Modifier
-              .clickable { showEngineMenu = true }
-              .testTag("btn_engine_selector")
+        // Multi-Model Selector Pill
+        Surface(
+          shape = RoundedCornerShape(8.dp),
+          color = ChronoCardSurface,
+          border = BorderStroke(1.dp, ChronoPrimary.copy(alpha = 0.6f)),
+          modifier = Modifier
+            .clickable { showModelSelectorSheet = true }
+            .testTag("btn_engine_selector")
+        ) {
+          Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
           ) {
-            Row(
-              modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-              verticalAlignment = Alignment.CenterVertically
-            ) {
-              Icon(
-                imageVector = if (engineType == AiEngineType.ONLINE_GEMINI) Icons.Default.CloudDone
-                else if (engineType == AiEngineType.OFFLINE_CORE) Icons.Default.CloudOff
-                else Icons.Default.Cable,
-                contentDescription = null,
-                tint = if (engineType == AiEngineType.OFFLINE_CORE) Color(0xFFF59E0B) else ChronoAccent,
-                modifier = Modifier.size(16.dp)
-              )
-              Spacer(modifier = Modifier.width(6.dp))
-              Text(
-                text = engineType.displayName,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = ChronoTextPrimary,
-                fontFamily = FontFamily.Monospace
-              )
-            }
-          }
-
-          DropdownMenu(
-            expanded = showEngineMenu,
-            onDismissRequest = { showEngineMenu = false }
-          ) {
-            AiEngineType.values().forEach { type ->
-              DropdownMenuItem(
-                text = {
-                  Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = "${type.displayName} (${type.badge})")
-                    if (engineType == type) {
-                      Spacer(modifier = Modifier.width(8.dp))
-                      Icon(Icons.Default.Check, contentDescription = null, tint = ChronoPrimary)
-                    }
-                  }
-                },
-                onClick = {
-                  viewModel.setEngineType(type)
-                  showEngineMenu = false
-                }
-              )
-            }
+            Icon(
+              imageVector = if (selectedModel.mode == com.example.model.ExecutionMode.ONLINE_CLOUD) Icons.Default.CloudDone
+              else Icons.Default.Cable,
+              contentDescription = null,
+              tint = if (selectedModel.mode == com.example.model.ExecutionMode.ONLINE_CLOUD) ChronoAccent else Color(0xFFF59E0B),
+              modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+              text = selectedModel.displayName,
+              fontSize = 11.sp,
+              fontWeight = FontWeight.Bold,
+              color = ChronoTextPrimary,
+              fontFamily = FontFamily.Monospace
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+              text = "▾",
+              fontSize = 11.sp,
+              color = ChronoPrimary
+            )
           }
         }
 

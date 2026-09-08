@@ -38,6 +38,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -77,6 +78,16 @@ fun DualEngineDiagnosticsView(
       .verticalScroll(rememberScrollState())
       .padding(16.dp)
   ) {
+    val selectedModel by viewModel.selectedModel.collectAsState()
+    var showModelSheet by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+
+    if (showModelSheet) {
+      ModelSelectorBottomSheet(
+        viewModel = viewModel,
+        onDismiss = { showModelSheet = false }
+      )
+    }
+
     // Header
     Card(
       shape = RoundedCornerShape(16.dp),
@@ -99,7 +110,7 @@ fun DualEngineDiagnosticsView(
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-              text = "DUAL-ENGINE CONTROL",
+              text = "MULTI-MODEL ENGINE MATRIX",
               fontSize = 11.sp,
               fontFamily = FontFamily.Monospace,
               fontWeight = FontWeight.Bold,
@@ -125,24 +136,35 @@ fun DualEngineDiagnosticsView(
 
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-          text = "Hybrid AI Architecture Hub",
+          text = "Unified Multi-Model Hub",
           fontSize = 17.sp,
           fontWeight = FontWeight.Bold,
           color = ChronoTextPrimary
         )
         Text(
-          text = "Seamless switching between Cloud Google Gemini 3.5 Flash and Autonomous On-Device Neural Engine.",
+          text = "Claude 3.5 Sonnet, GPT-4o, Google Gemini, DeepSeek-V3/R1 এবং অফলাইন Ollama মডেল (Qwen, Llama, Mistral) সরাসরি কানেক্টেড।",
           fontSize = 12.sp,
           color = ChronoTextSecondary,
           lineHeight = 17.sp
         )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Button(
+          onClick = { showModelSheet = true },
+          colors = ButtonDefaults.buttonColors(containerColor = ChronoPrimary),
+          shape = RoundedCornerShape(10.dp),
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Text("Open Model Matrix & API Settings", color = Color(0xFF003544), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+        }
       }
     }
 
     Spacer(modifier = Modifier.height(16.dp))
 
     Text(
-      text = "ENGINE SWITCHER (অনলাইন ও অফলাইন)",
+      text = "CURRENT ACTIVE MODEL",
       fontSize = 11.sp,
       fontFamily = FontFamily.Monospace,
       fontWeight = FontWeight.Bold,
@@ -151,34 +173,123 @@ fun DualEngineDiagnosticsView(
 
     Spacer(modifier = Modifier.height(8.dp))
 
-    // 3 Engine Cards
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-      EngineSelectionCard(
-        title = "Smart Auto-Hybrid (Recommended)",
-        badge = "Adaptive",
-        description = "Uses Google Gemini when online; automatically falls back to On-Device Engine if internet drops.",
-        isSelected = engineType == AiEngineType.AUTO_HYBRID,
-        icon = Icons.Default.Cable,
-        onClick = { viewModel.setEngineType(AiEngineType.AUTO_HYBRID) }
-      )
+    // Active Model Card
+    Card(
+      shape = RoundedCornerShape(12.dp),
+      colors = CardDefaults.cardColors(containerColor = ChronoPrimary.copy(alpha = 0.12f)),
+      border = BorderStroke(1.2.dp, ChronoPrimary),
+      modifier = Modifier
+        .fillMaxWidth()
+        .clickable { showModelSheet = true }
+    ) {
+      Row(
+        modifier = Modifier.padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Column(modifier = Modifier.weight(1f)) {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+              text = selectedModel.displayName,
+              fontSize = 15.sp,
+              fontWeight = FontWeight.Bold,
+              color = ChronoPrimary
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Surface(
+              shape = RoundedCornerShape(4.dp),
+              color = ChronoPrimary.copy(alpha = 0.2f)
+            ) {
+              Text(
+                text = selectedModel.provider,
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                color = ChronoPrimary,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+              )
+            }
+          }
+          Spacer(modifier = Modifier.height(4.dp))
+          Text(
+            text = selectedModel.description,
+            fontSize = 11.sp,
+            color = ChronoTextSecondary
+          )
+        }
 
-      EngineSelectionCard(
-        title = "100% Offline On-Device Engine",
-        badge = "Zero Internet",
-        description = "Direct embedded intelligence. 0ms network lag, completely private, fully functional offline.",
-        isSelected = engineType == AiEngineType.OFFLINE_CORE,
-        icon = Icons.Default.CloudOff,
-        onClick = { viewModel.setEngineType(AiEngineType.OFFLINE_CORE) }
-      )
+        Text(
+          text = "Change ▾",
+          fontSize = 12.sp,
+          fontWeight = FontWeight.Bold,
+          color = ChronoPrimary
+        )
+      }
+    }
 
-      EngineSelectionCard(
-        title = "Google Gemini 3.5 Cloud Engine",
-        badge = "Deep Reasoning",
-        description = "Connects to Google Generative AI for maximum multi-turn context and large-scale code synthesis.",
-        isSelected = engineType == AiEngineType.ONLINE_GEMINI,
-        icon = Icons.Default.CloudDone,
-        onClick = { viewModel.setEngineType(AiEngineType.ONLINE_GEMINI) }
-      )
+    Spacer(modifier = Modifier.height(16.dp))
+
+    Text(
+      text = "QUICK MODEL SWITCHER (অনলাইন ও অফলাইন)",
+      fontSize = 11.sp,
+      fontFamily = FontFamily.Monospace,
+      fontWeight = FontWeight.Bold,
+      color = ChronoPrimary
+    )
+
+    Spacer(modifier = Modifier.height(8.dp))
+
+    // Quick selection of premier models
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+      listOf(
+        com.example.model.SupportedAiModel.CLAUDE_35_SONNET,
+        com.example.model.SupportedAiModel.GPT_4O,
+        com.example.model.SupportedAiModel.GEMINI_FLASH,
+        com.example.model.SupportedAiModel.DEEPSEEK_R1_CLOUD,
+        com.example.model.SupportedAiModel.QWEN_25_CODER_7B,
+        com.example.model.SupportedAiModel.CHRONO_AUTO_HYBRID
+      ).forEach { model ->
+        val isSelected = selectedModel == model
+        Card(
+          shape = RoundedCornerShape(10.dp),
+          colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) ChronoPrimary.copy(alpha = 0.12f) else ChronoCardSurface
+          ),
+          border = BorderStroke(
+            if (isSelected) 1.5.dp else 0.8.dp,
+            if (isSelected) ChronoPrimary else ChronoCardBorder
+          ),
+          modifier = Modifier
+            .fillMaxWidth()
+            .clickable { viewModel.setSelectedModel(model) }
+        ) {
+          Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Column(modifier = Modifier.weight(1f)) {
+              Text(
+                text = model.displayName,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isSelected) ChronoPrimary else ChronoTextPrimary
+              )
+              Text(
+                text = "${model.categoryLabel} • ${model.provider}",
+                fontSize = 10.sp,
+                color = ChronoTextSecondary
+              )
+            }
+
+            if (isSelected) {
+              Icon(
+                imageVector = Icons.Default.CheckCircle,
+                contentDescription = null,
+                tint = ChronoPrimary,
+                modifier = Modifier.size(18.dp)
+              )
+            }
+          }
+        }
+      }
     }
 
     Spacer(modifier = Modifier.height(20.dp))

@@ -486,4 +486,54 @@ fun main() {
     }
     return Pair(text, listOf(CodeSnippet("kotlin", code, if (isBengali) "জেনেরিক টাইপ T ব্যবহার করে যেকোনো Comparable ডেটায় কাজ করবে।" else "Uses Kotlin generics and O(N) scanning.")))
   }
+
+  fun generateResponseForModel(
+    prompt: String,
+    persona: AiPersona,
+    model: com.example.model.SupportedAiModel
+  ): Triple<String, List<CodeSnippet>, String?> {
+    val (baseText, snippets) = generateResponse(prompt, persona)
+
+    val modelFlavor = when (model) {
+      com.example.model.SupportedAiModel.DEEPSEEK_R1_CLOUD,
+      com.example.model.SupportedAiModel.DEEPSEEK_R1_DISTILL_8B -> {
+        val thoughts = """
+          1. ইউজার প্রম্পট অ্যানালাইসিস: "${prompt.take(60)}"
+          2. কনটেক্সট যাচাই: ${persona.displayName} পার্সোনায় রেসপন্স তৈরি করতে হবে।
+          3. রিজনিং চেইন: লজিক্যাল স্টেপগুলো সাজিয়ে সর্বোত্তম ও নির্ভুল অ্যালগরিদম নিশ্চিত করা হলো।
+          4. কনক্লুশন: চূড়ান্ত সমাধান প্রস্তুত।
+        """.trimIndent()
+        Triple(baseText, snippets, thoughts)
+      }
+
+      com.example.model.SupportedAiModel.CLAUDE_35_SONNET -> {
+        val architecturalPrefix = "### 🏛️ Claude 3.5 Architectural Overview:\n"
+        Triple(architecturalPrefix + baseText, snippets, null)
+      }
+
+      com.example.model.SupportedAiModel.QWEN_25_CODER_7B,
+      com.example.model.SupportedAiModel.QWEN_25_CODER_14B -> {
+        val qwenPrefix = "### ⚡ Qwen 2.5 Coder Optimized Execution:\n"
+        val enhancedSnippets = if (snippets.isNotEmpty()) {
+          snippets.map { it.copy(explanation = it.explanation + " [Complexity: O(N) Time, O(1) Space]") }
+        } else snippets
+        Triple(qwenPrefix + baseText, enhancedSnippets, null)
+      }
+
+      com.example.model.SupportedAiModel.GPT_4O -> {
+        val gptPrefix = "### 🌐 GPT-4o Comprehensive Synthesis:\n"
+        Triple(gptPrefix + baseText, snippets, null)
+      }
+
+      com.example.model.SupportedAiModel.CODESTRAL_22B,
+      com.example.model.SupportedAiModel.MISTRAL_7B -> {
+        val mistralPrefix = "### 🚀 Codestral Fast Delivery:\n"
+        Triple(mistralPrefix + baseText, snippets, null)
+      }
+
+      else -> Triple(baseText, snippets, null)
+    }
+
+    return modelFlavor
+  }
 }

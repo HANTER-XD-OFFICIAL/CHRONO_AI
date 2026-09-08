@@ -1,6 +1,6 @@
 {
   "name": "CHRONO AI",
-  "description": "Human-like conversational & coding AI assistant running both online (Google Gemini) and offline (On-Device Neural Engine) in Bengali and English.",
+  "description": "Unified Multi-Model conversational & coding AI with Claude 3.5 Sonnet, GPT-4o, Gemini 1.5, DeepSeek-V3/R1, Qwen 2.5 Coder, and local Ollama offline engines.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
