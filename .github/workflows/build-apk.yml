@@ -1,0 +1,140 @@
+name: Build Android APK (CHRONO AI)
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Select Build Type'
+        required: true
+        default: 'debug'
+        type: choice
+        options:
+          - debug
+          - release
+          - both
+      release_title:
+        description: 'GitHub Release Title (leave empty to only download from Artifacts)'
+        required: false
+        default: ''
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build & Package APK
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Prepare Environment (.env)
+        run: |
+          echo "Setting up .env file..."
+          if [ -f .env.example ]; then
+            cp .env.example .env
+          else
+            touch .env
+          fi
+          if [ -n "${{ secrets.GEMINI_API_KEY }}" ]; then
+            sed -i '/GEMINI_API_KEY/d' .env || true
+            echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" >> .env
+          fi
+          echo ".env prepared successfully."
+
+      - name: Restore or Generate Debug Keystore
+        run: |
+          echo "Configuring debug keystore..."
+          if [ -f debug.keystore.base64 ] && [ ! -f debug.keystore ]; then
+            base64 -d debug.keystore.base64 > debug.keystore || true
+          fi
+          if [ ! -f debug.keystore ]; then
+            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          fi
+          echo "Debug keystore ready."
+
+      - name: Make Gradle Wrapper Executable
+        run: chmod +x gradlew
+
+      - name: Build Debug APK
+        if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || inputs.build_type == 'debug' || inputs.build_type == 'both' }}
+        run: |
+          echo "Building Debug APK..."
+          ./gradlew assembleDebug --stacktrace --no-daemon
+
+      - name: Build Release APK
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.build_type == 'release' || inputs.build_type == 'both') }}
+        run: |
+          echo "Building Release APK..."
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release-keystore.jks
+            export KEYSTORE_PATH="release-keystore.jks"
+            export STORE_PASSWORD="${{ secrets.STORE_PASSWORD }}"
+            export KEY_PASSWORD="${{ secrets.KEY_PASSWORD }}"
+            ./gradlew assembleRelease --stacktrace --no-daemon
+          else
+            echo "No custom release keystore provided. Building release APK with fallback signing..."
+            ./gradlew assembleRelease --stacktrace --no-daemon || echo "Skipping signed release; debug APK is fully installable."
+          fi
+
+      - name: Organize Artifacts
+        run: |
+          mkdir -p release-apks
+          if [ -f app/build/outputs/apk/debug/app-debug.apk ]; then
+            cp app/build/outputs/apk/debug/app-debug.apk release-apks/CHRONO-AI-debug.apk
+            echo "Copied CHRONO-AI-debug.apk"
+          fi
+          if [ -f app/build/outputs/apk/release/app-release.apk ]; then
+            cp app/build/outputs/apk/release/app-release.apk release-apks/CHRONO-AI-release.apk
+            echo "Copied CHRONO-AI-release.apk"
+          fi
+          if [ -f app/build/outputs/apk/release/app-release-unsigned.apk ]; then
+            cp app/build/outputs/apk/release/app-release-unsigned.apk release-apks/CHRONO-AI-release-unsigned.apk
+            echo "Copied CHRONO-AI-release-unsigned.apk"
+          fi
+          ls -lh release-apks/
+
+      - name: Upload APK as Workflow Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CHRONO-AI-APK
+          path: release-apks/*.apk
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Create GitHub Release (If requested)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_title != '' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ inputs.release_title }}
+          tag_name: release-${{ github.run_number }}
+          files: release-apks/*.apk
+          body: |
+            ### 🚀 CHRONO AI Android Release
+            - **Build Type**: ${{ inputs.build_type }}
+            - **Run Number**: #${{ github.run_number }}
+            - **Commit**: `${{ github.sha }}`
+            
+            Download the APK attached below and install directly on your Android phone!
+          generate_release_notes: true
